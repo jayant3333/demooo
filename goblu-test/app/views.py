@@ -8,25 +8,6 @@ from .data_store import template_message_sent  # Import the dictionary from the 
 
 webhook_blueprint = Blueprint("webhook", __name__)
 
-def send_template_message(to):
-    url = "https://graph.facebook.com/v20.0/368948182969171/messages"
-    headers = {
-        "Authorization": "Bearer EAAuXEbmPW2sBOzStTSW3sB9HibwuGeJ8sTiJgKb82tC3XZCbxrqDZAppZACGvFk4aS2xfwqiThMUXwjQJWAZCwtbvnYs2fAF3pBgZBDY6xGYyrJMidTpvyxOiLXvXy6eUx03xyTvJQo1VDnupSqOZCbI2tiZAFszhZAcs2ejeaNwLIyym20EmfcI9GwlZBFRQPTJofEZCTZCvXuMgPW8Cbd3HcZD",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "template",
-        "template": {
-            "name": "starting_message",
-            "language": {
-                "code": "en"
-            }
-        }
-    }
-    response = requests.post(url, headers=headers, data=json.dumps(payload))
-    return response.json()
 
 def handle_message():
     """
@@ -66,14 +47,7 @@ def handle_message():
             messages = value.get("messages", [{}])[0]
             from_phone_number = messages.get("from")
 
-            if from_phone_number:
-                # Check if the template message has already been sent to this user
-                if not template_message_sent.get(from_phone_number):
-                    # Send the template message to the sender
-                    template_response = send_template_message(from_phone_number)
-                    logging.info(f"Template message response: {template_response}")
-                    # Mark the template message as sent for this user
-                    template_message_sent[from_phone_number] = True
+            
 
             return jsonify({"status": "ok"}), 200
         else:
