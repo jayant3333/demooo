@@ -24,7 +24,7 @@ import os
 import google.generativeai as genai
 conversation_history = {}
 
-genai.configure(api_key="AIzaSyBxpDZCa_G5pjBkXphsujAsiDDSqzW2qxs")
+genai.configure(api_key="AIzaSyCOIM-iwFeaVE6G16sp_e5DetvFlb-JHyk")
 
 # Create the model
 # See https://ai.google.dev/api/python/google/generativeai/GenerativeModel
