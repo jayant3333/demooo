@@ -70,11 +70,16 @@ import shelve
 from datetime import datetime, timedelta
 
 # Store a thread's history along with the current timestamp
-def store_thread(wa_id, history):
+def store_thread(wa_id, history, current_state):
     print("Storing thread...")
     current_time = datetime.now()  # Capture the current timestamp
     with shelve.open("threads_db", writeback=True) as threads_shelf:
-        threads_shelf[wa_id] = {"history": history, "timestamp": current_time}
+        threads_shelf[wa_id] = {
+            "history": history, 
+            "timestamp": current_time, 
+            "current_state": current_state  # Store the current state
+        }
+
 
 # Check if a thread exists and if it's older than 5 minutes
 def check_if_thread_exists(wa_id):
@@ -98,19 +103,16 @@ def check_if_thread_exists(wa_id):
                     time_diff = current_time - thread_timestamp
 
                     if time_diff > timedelta(minutes=5):
-                        # Close the shelve before deleting
-                        threads_shelf.close()
-
-                        # Delete the old thread if older than 5 minutes
                         print(f"Thread for wa_id {wa_id} is older than 5 minutes. Deleting...")
                         delete_thread_history(wa_id)
-                        return []  # Return an empty history since thread is deleted
+                        return None, None  # Return None for both history and state since thread is deleted
                     else:
-                        print(f"Thread for wa_id {wa_id} is within 5 minutes. Returning history.")
-                        return thread_data["history"]  # Return the current history
+                        print(f"Thread for wa_id {wa_id} is within 5 minutes. Returning history and state.")
+                        return thread_data["history"], thread_data.get("current_state", None)  # Return history and current state
         
         print(f"No thread found for wa_id {wa_id}.")
-        return None  # No thread found or not older than 5 minutes
+        return None, None  # No thread found or not older than 5 minutes
+
 # Delete thread history if it exists
 def delete_thread_history(wa_id):
     print("Deleting thread...")
@@ -234,6 +236,91 @@ def check_serviceable(long,lat):
             return {"error": f"Failed to fetch data. Status code: {response.status_code}"}
     except requests.RequestException as e:
         return {"error": str(e)}
+    
+
+def estimate_fare(data):
+    url = 'https://webapi.goblu-ev.com/v1/call/estimate-fare'
+    headers = {
+        'Content-Type': 'application/json',
+    }
+    
+
+    response = requests.post(url, json=data, headers=headers)
+
+    if response.status_code == 200:
+        response_data = response.json()
+
+        # Check if 'packages' exist, if not, return status
+        if 'packages' in response_data and response_data['packages']:
+            total_fare = response_data['packages'][0].get('totalFare')
+            request_id = response_data.get('id')
+            return {'totalFare': total_fare, 'id': request_id}
+        else:
+            # If packages are not present, return status
+            status = response_data.get('status')
+            message = response_data.get('message')
+            return {'status': status, 'message': message}
+    else:
+        return f"Error: {response.status_code}, {response.text}"
+    
+
+
+def book_ride(request_id):
+    url = 'https://webapi.goblu-ev.com/v1/call/schedule-ride'
+    headers = {
+        'Content-Type': 'application/json',
+    }
+    data = {
+        "requestId": request_id
+    }
+
+    response = requests.post(url, json=data, headers=headers)
+
+    if response.status_code == 200:
+        return response.json()  # Assuming the API returns JSON response
+    else:
+        return f"Error: {response.status_code}, {response.text}"
+def push_booking(wa_id, booking_id):
+    print("hiii")
+    # Load the existing JSON data
+    try:
+        with open('booking_info.json', 'r') as json_file:
+            data = json.load(json_file)
+            print("file open")
+    except FileNotFoundError:
+        # Initialize an empty dictionary if the file doesn't exist
+        data = {}
+
+    # If wa_id exists, append the new booking_id to the list (stack)
+    if wa_id in data:
+        data[wa_id].append(booking_id)
+        print("hgjyg")
+    else:
+        # Create a new list for the wa_id if it doesn't exist
+        print("ggdfgdfg")
+        data[wa_id] = [booking_id]
+
+    # Save updated data back to the JSON file
+    with open('booking_info.json', 'w') as json_file:
+        print("gfdsgtgdfgghfhgfhgfhfh")
+        json.dump(data, json_file)
+def get_most_recent_booking_id(wa_id):
+    # Load the JSON file
+    try:
+        with open('booking_info.json', 'r') as json_file:
+            data = json.load(json_file)
+            print(data)
+    except FileNotFoundError:
+        # Return None if the file or wa_id doesn't exist
+        return None
+
+    # Return the most recent booking (last in the list)
+    if wa_id in data and data[wa_id]:
+        print(data[wa_id])
+        return data[wa_id][-1]  # Peek the top of the stack
+    else:
+        return None  # Return None if wa_id not found or list is empty
+
 def generate_response(message_body, wa_id, name,message_type):
     global current_state
     print(message_body)
@@ -245,10 +332,10 @@ def generate_response(message_body, wa_id, name,message_type):
     message_body_lower = message_body.lower()
     if message_body_lower in list:
         delete_thread_history(wa_id)
-        send_template_message(wa_id,name)
+        send_template_message(wa_id)
         return ""
     # Check if there is already a conversation history for the wa_id
-    history = check_if_thread_exists(wa_id)
+    history , current_state = check_if_thread_exists(wa_id)
     
     # If no history exists, initialize a new conversation
     if history is None :
@@ -278,7 +365,7 @@ def generate_response(message_body, wa_id, name,message_type):
         current_state = "enquiry"
     elif "booking" in message_body_lower:
         current_state = "booking"
-    elif "complaints and feedback" in message_body_lower:
+    elif "complains and feedbacks" in message_body_lower:
         current_state = "complaints and feedback"
     elif "confirm" in message_body_lower:
 
@@ -294,7 +381,7 @@ def generate_response(message_body, wa_id, name,message_type):
             "role": "model",
             "parts": [response.text]
         })
-        store_thread(wa_id, history)
+        store_thread(wa_id, history,current_state)
         return response.text
     elif current_state == "booking":
         while current_state == "booking":
@@ -315,7 +402,7 @@ def generate_response(message_body, wa_id, name,message_type):
                         "role": "model",
                         "parts": [agent_response.text]
                     })
-                    store_thread(wa_id, history)
+                    store_thread(wa_id, history,current_state)
                     return agent_response.text
             
 
@@ -337,7 +424,7 @@ def generate_response(message_body, wa_id, name,message_type):
                         "role": "model",
                         "parts": [agent_response.text]
                     })
-                    store_thread(wa_id, history)
+                    store_thread(wa_id, history,current_state)
                     return agent_response.text
                 
             elif  message_type == "text" and "maps.apple.com" in message_body:
@@ -355,7 +442,7 @@ def generate_response(message_body, wa_id, name,message_type):
                         "role": "model",
                         "parts": [agent_response.text]
                     })
-                    store_thread(wa_id, history)
+                    store_thread(wa_id, history,current_state)
                     return agent_response.text
 
             else:
@@ -365,7 +452,7 @@ def generate_response(message_body, wa_id, name,message_type):
                     "role": "model",
                     "parts": [agent_response.text]
                 })
-                store_thread(wa_id, history)
+                store_thread(wa_id, history,current_state)
                 return agent_response.text
     elif current_state == "complaints and feedback":
         response = chat_session.send_message(message_body)
@@ -373,12 +460,12 @@ def generate_response(message_body, wa_id, name,message_type):
             "role": "model",
             "parts": [response.text]
         })
-        store_thread(wa_id, history)
+        store_thread(wa_id, history,current_state)
         return response.text
+    
     elif current_state == "confirm":
         # Handle confirmation
         datai = chat_session.send_message("give me all booking details in python dict as the date as DD/MM/YYYY and time as HH:MM 12 hrs format no extra text only dict as keys as up,down,time,date up contains only coordinates and down conatains only coordinates for example {'up': {'lat': 26.9026885, 'long': 75.7986445}, 'down': {'lat': 26.903216, 'long': 75.799425, 'name': 'Hari om shop'}, 'date': '30/09/2024', 'time': '05:45 PM'}")
-
         text = datai.text
         print(text)
         latitude_pattern = r"'lat':\s(-?[\d.]+)"
@@ -401,30 +488,44 @@ def generate_response(message_body, wa_id, name,message_type):
 
         # Combine into a list
         result = [up_coords, down_coords, time, date]
-
         print(result)
+        data = { }
+        data["pickup"] = result[0]
+        data["dropoff"] = result[1]
+        data["time"] = result[2]
+        data["date"] = result[3]
+        data["name"] = name
+        data["phoneNo"] = wa_id
         
         # Check availability in API
-        fare = get_ride_fare(result[0], result[1])
+        resp = estimate_fare(data)
+        print(resp)
+
+        if 'id' not in resp:
+            return "slot is not Available"
+        else:
+
         
-        '''global api_data 
-        api_data = []
-        api_data.append(values[0])
-        api_data.append(values[1])
-        time = convert_time_date(values[2], values[3])
-        ty = get_time_slot_availability(values[0], values[1], time)
-        iso = convert_to_iso8601(time)
-        api_data.append(iso)
-        api_data.append(ty)
-        if api_response_drop and api_response_pick and ty['availability']:'''
-        current_state = "confirm_yes_no"
-        response_text = f"We are servicing here and slot is also available, the fare is {fare}.{send_template_message_yes(wa_id,name)}"
-        history.append({
-            "role": "model",
-            "parts": [response_text]
-        })
-        store_thread(wa_id, history)
-        return response_text
+            '''global api_data 
+            api_data = []
+            api_data.append(values[0])
+            api_data.append(values[1])
+            time = convert_time_date(values[2], values[3])
+            ty = get_time_slot_availability(values[0], values[1], time)
+            iso = convert_to_iso8601(time)
+            api_data.append(iso)
+            api_data.append(ty)
+            if api_response_drop and api_response_pick and ty['availability']:'''
+            current_state = "confirm_yes_no"
+            response_text = f"We are servicing here and slot is also available, the fare is {resp['totalFare']}.{send_template_message_yes(wa_id)}"
+            history.append({
+                "role": "model",
+                "parts": [response_text]
+            })
+            store_thread(wa_id, history,current_state)
+            booking_id = resp['id']
+            push_booking(wa_id,booking_id)
+            return response_text
         '''else:
             current_state = "booking"
             chat_session.send_message("confirm")
@@ -442,9 +543,11 @@ def generate_response(message_body, wa_id, name,message_type):
                 "role": "model",
                 "parts": [response_text]
             })
-            store_thread(wa_id, history)
+            store_thread(wa_id, history,current_state)
             current_state = None
-            return response_text
+            idt = get_most_recent_booking_id(wa_id)
+            redf = book_ride(idt)
+            return redf['message']
         elif message_body_lower == "no" and current_state == "confirm_yes_no":
             api_data = []
             current_state = "enquiry"
@@ -454,17 +557,17 @@ def generate_response(message_body, wa_id, name,message_type):
                 "role": "model",
                 "parts": [response_text]
             })
-            store_thread(wa_id, history)
+            store_thread(wa_id, history,current_state)
             current_state = None
             return response_text
         else:
             current_state = "confirm_yes_no"
-            response_text = f"Invalid response. Please respond with 'yes' or 'no'.{send_template_message_yes(wa_id,name)}"
+            response_text = f"Invalid response. Please respond with 'yes' or 'no'.{send_template_message_yes(wa_id)}"
             history.append({
                 "role": "model",
                 "parts": [response_text]
             })
-            store_thread(wa_id, history)
+            store_thread(wa_id, history,current_state)
             
             return response_text
     
@@ -518,7 +621,7 @@ def convert_to_iso8601(date_time_str):
     # Truncate the microseconds to milliseconds
     return iso8601_format[:-3] + 'Z'
 
-def send_template_message(to,name_i):
+def send_template_message(to):
     url = "https://graph.facebook.com/v20.0/368948182969171/messages"
     headers = {
         "Authorization": "Bearer EAAuXEbmPW2sBOZBLfFHJKCPAEVcfg2iHmqxkoxBZBLyhx48DXlDmrMEakZCNfhZBcVzBlPQZA8aUkyse0wKqSVyXC3eyDfLg9rTM4oSLnUHbPmjhZAZA8q3aB4ue3rHfmYrnZCHzQqwZAVKTCLlmJ5oXkySlxaZB6ksZBiU5wm2P9JB7yp519Ah5v4mLEpi2btcZB0ks065dZBKnZBGouI1ZCcp0w2BL5fSFbnVWHV4aHZBAMDT2",
@@ -532,18 +635,8 @@ def send_template_message(to,name_i):
             "name": "goblu_first",  # Your template name
             "language": {
                 "code": "en"
-            },
-            "components": [
-                {
-                    "type": "header",
-                    "parameters": [
-                        {
-                            "type": "text",
-                            "text": name_i  # This will dynamically insert the user's name
-                        }
-                    ]
-                }
-            ]
+            }
+            
         }
     }
     response = requests.post(url, headers=headers, data=json.dumps(payload))
@@ -587,7 +680,7 @@ def send_location_request_message(to):
         print(f"Failed to send message. Status Code: {response.status_code}")
         print(f"Response: {response.text}")
 
-def send_template_message_yes(to,name_i):
+def send_template_message_yes(to):
     url = "https://graph.facebook.com/v20.0/368948182969171/messages"
     headers = {
         "Authorization": "Bearer EAAuXEbmPW2sBOZBLfFHJKCPAEVcfg2iHmqxkoxBZBLyhx48DXlDmrMEakZCNfhZBcVzBlPQZA8aUkyse0wKqSVyXC3eyDfLg9rTM4oSLnUHbPmjhZAZA8q3aB4ue3rHfmYrnZCHzQqwZAVKTCLlmJ5oXkySlxaZB6ksZBiU5wm2P9JB7yp519Ah5v4mLEpi2btcZB0ks065dZBKnZBGouI1ZCcp0w2BL5fSFbnVWHV4aHZBAMDT2",
@@ -601,21 +694,11 @@ def send_template_message_yes(to,name_i):
             "name": "yes_no",  # Your template name
             "language": {
                 "code": "en"
-            },
-            "components": [
-                {
-                    "type": "body",
-                    "parameters": [
-                        {
-                            "type": "text",
-                            "text": name_i  # This will dynamically insert the user's name
-                        }
-                    ]
-                }
-            ]
+            }
         }
     }
     response = requests.post(url, headers=headers, data=json.dumps(payload))
+    return " "
     print(response)
 def convert_time_date(time_str, date_str):
     """
