@@ -10,6 +10,7 @@ webhook_blueprint = Blueprint("webhook", __name__)
 
 
 def handle_message():
+    from datetime import datetime ,timedelta
     """
     Handle incoming webhook events from the WhatsApp API.
 
@@ -24,47 +25,56 @@ def handle_message():
         response: A tuple containing a JSON response and an HTTP status code.
     """
     body = request.get_json()
-    # logging.info(f"request body: {body}")
+    print("body")
 
-    # Check if it's a WhatsApp status update
-    if (
-        body.get("entry", [{}])[0]
-        .get("changes", [{}])[0]
-        .get("value", {})
-        .get("statuses")
-    ):
-        logging.info("Received a WhatsApp status update.")
-        return jsonify({"status": "ok"}), 200
+    
 
-    try:
-        if is_valid_whatsapp_message(body):
+    message_details = {
+        "id": body.get("id"),
+        "created": body.get("created"),
+        "whatsapp_message_id": body.get("whatsappMessageId"),
+        "conversation_id": body.get("conversationId"),
+        "ticket_id": body.get("ticketId"),
+        "text": body.get("text"),
+        "type": body.get("type"),
+        "status_string": body.get("statusString"),
+        "wa_id": body.get("waId"),
+        "sender_name": body.get("senderName"),
+        "timestamp": body.get("timestamp"),
+    }
+     
+    print(message_details["created"])
+
+    timestamp = datetime.strptime(message_details["created"].split('.')[0], "%Y-%m-%dT%H:%M:%S")
+
+    # Get the current time
+    current_time = datetime.utcnow() - timedelta(minutes=1)
+
+    # Compare the times
+    if timestamp < current_time:
+        print("The given timestamp is earlier than the current time.")
+        l= ['919460733741', '916352698962']
+        if message_details['wa_id'] in l:
+            logging.info(f"Message details0: {message_details}")
             process_whatsapp_message(body)
 
-            # Extract the recipient's phone number
-            entry = body.get("entry", [])[0]
-            changes = entry.get("changes", [])[0]
-            value = changes.get("value", {})
-            messages = value.get("messages", [{}])[0]
-            from_phone_number = messages.get("from")
+        # Log the extracted details
+        logging.info(f"Message details: {message_details}")
+        print(jsonify({"status": "error", "message": "Invalid JSON provided"}))
+        return jsonify({"status": "error", "message": "Invalid JSON provided"})
 
-            
+    else:
 
-            return jsonify({"status": "ok"}), 200
-        else:
-            # if the request is not a WhatsApp API event, return an error
-            return (
-                jsonify({"status": "error", "message": "Not a WhatsApp API event"}),
-                404,
-            )
-    except json.JSONDecodeError:
-        logging.error("Failed to decode JSON")
-        return jsonify({"status": "error", "message": "Invalid JSON provided"}), 400
-
-
+        print("The given timestamp is later than or equal to the current time.")
+        response = jsonify({"status": "error", "message": "Invalid JSON provided"})
+        response.status_code = 200
+        return response
+       
 # Required webhook verification for WhatsApp
 def verify():
     # Parse params from the webhook verification request
     print("hello")
+    print(request.json)
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
@@ -86,11 +96,12 @@ def verify():
         return jsonify({"status": "error", "message": "Missing parameters"}), 400
 
 
-@webhook_blueprint.route("/webhook", methods=["GET"])
+'''@webhook_blueprint.route("/webhook", methods=["GET"])
 def webhook_get():
-    return verify()
+    return verify()'''
 
 @webhook_blueprint.route("/webhook", methods=["POST"])
-@signature_required
+# @signature_required
 def webhook_post():
+    print("Yes Webhook")
     return handle_message()

@@ -243,8 +243,6 @@ def estimate_fare(data):
     headers = {
         'Content-Type': 'application/json',
     }
-    
-
     response = requests.post(url, json=data, headers=headers)
 
     if response.status_code == 200:
@@ -273,9 +271,7 @@ def book_ride(request_id):
     data = {
         "requestId": request_id
     }
-
     response = requests.post(url, json=data, headers=headers)
-
     if response.status_code == 200:
         return response.json()  # Assuming the API returns JSON response
     else:
@@ -321,8 +317,10 @@ def get_most_recent_booking_id(wa_id):
     else:
         return None  # Return None if wa_id not found or list is empty
 
-def generate_response(message_body, wa_id, name,message_type):
+def generate_response(message_body, wa_id, name,message_type,prev):
+    print(prev)
     global current_state
+    print(message_type)
     print(message_body)
     print(type(message_body))
     print(current_state)
@@ -332,7 +330,7 @@ def generate_response(message_body, wa_id, name,message_type):
     message_body_lower = message_body.lower()
     if message_body_lower in list:
         delete_thread_history(wa_id)
-        send_template_message(wa_id)
+        send_wati_sms_greet(wa_id)
         return ""
     # Check if there is already a conversation history for the wa_id
     history , current_state = check_if_thread_exists(wa_id)
@@ -359,8 +357,7 @@ def generate_response(message_body, wa_id, name,message_type):
             current_state = "confirm"'''
 
     # Get the model's response
-    
-    
+
     if "enquiry" in message_body_lower:
         current_state = "enquiry"
     elif "booking" in message_body_lower:
@@ -368,10 +365,8 @@ def generate_response(message_body, wa_id, name,message_type):
     elif "complains and feedbacks" in message_body_lower:
         current_state = "complaints and feedback"
     elif "confirm" in message_body_lower:
-
         current_state = "confirm"
     if current_state == None:
-
         return "please Select One Option From above menu To continue"
         
     # Handle conversation states
@@ -387,17 +382,24 @@ def generate_response(message_body, wa_id, name,message_type):
         while current_state == "booking":
             # Generate response from agent
             if(message_type == "location"):
+                print("hiiiiiiiiiiiiiii")
                 print(message_body)
-                print()
-                location_dict = eval(message_body)
+                
+                match = re.search(r"https://www\.google\.com/maps/search/([-+]?[0-9]*\.?[0-9]+),([-+]?[0-9]*\.?[0-9]+)", message_body)
 
-# Extract the latitude and longitude as a list
-                location_list = [location_dict['latitude'], location_dict['longitude']]
+                if match:
+                    latitude = float(match.group(1))
+                    longitude = float(match.group(2))
+                    location_list = [latitude, longitude]
+                    print(location_list)
+                else:
+                    print("Invalid message body format")
+        
                 rer = check_serviceable(location_list[0],location_list[1])
                 if rer == False:
                     return """ Oops! We're not servicing your location right now. 😔 But don’t worry! You can check our serviceable areas here: 🌍 at https://goblu-ev.com/service. We hope to serve you soon! 🚗💨 If you have any other questions, feel free to ask! 😊.   To Start Over Just type *Booking* """
                 else:
-                    agent_response = chat_session.send_message(message_body)
+                    agent_response = chat_session.send_message(str(location_list))
                     history.append({
                         "role": "model",
                         "parts": [agent_response.text]
@@ -504,8 +506,6 @@ def generate_response(message_body, wa_id, name,message_type):
         if 'id' not in resp:
             return "slot is not Available"
         else:
-
-        
             '''global api_data 
             api_data = []
             api_data.append(values[0])
@@ -517,7 +517,7 @@ def generate_response(message_body, wa_id, name,message_type):
             api_data.append(ty)
             if api_response_drop and api_response_pick and ty['availability']:'''
             current_state = "confirm_yes_no"
-            response_text = f"We are servicing here and slot is also available, the fare is {resp['totalFare']}.{send_template_message_yes(wa_id)}"
+            response_text = f"We are servicing here and slot is also available, the fare is {resp['totalFare']}.{send_wati_sms(wa_id)}"
             history.append({
                 "role": "model",
                 "parts": [response_text]
@@ -562,7 +562,7 @@ def generate_response(message_body, wa_id, name,message_type):
             return response_text
         else:
             current_state = "confirm_yes_no"
-            response_text = f"Invalid response. Please respond with 'yes' or 'no'.{send_template_message_yes(wa_id)}"
+            response_text = f"Invalid response. Please respond with 'yes' or 'no'.{send_wati_sms(wa_id)}"
             history.append({
                 "role": "model",
                 "parts": [response_text]
@@ -571,7 +571,6 @@ def generate_response(message_body, wa_id, name,message_type):
             
             return response_text
     
-
 
 import requests
 
@@ -621,25 +620,25 @@ def convert_to_iso8601(date_time_str):
     # Truncate the microseconds to milliseconds
     return iso8601_format[:-3] + 'Z'
 
-def send_template_message(to):
-    url = "https://graph.facebook.com/v20.0/368948182969171/messages"
-    headers = {
-        "Authorization": "Bearer EAAuXEbmPW2sBOZBLfFHJKCPAEVcfg2iHmqxkoxBZBLyhx48DXlDmrMEakZCNfhZBcVzBlPQZA8aUkyse0wKqSVyXC3eyDfLg9rTM4oSLnUHbPmjhZAZA8q3aB4ue3rHfmYrnZCHzQqwZAVKTCLlmJ5oXkySlxaZB6ksZBiU5wm2P9JB7yp519Ah5v4mLEpi2btcZB0ks065dZBKnZBGouI1ZCcp0w2BL5fSFbnVWHV4aHZBAMDT2",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "template",
-        "template": {
-            "name": "goblu_first",  # Your template name
-            "language": {
-                "code": "en"
-            }
-            
-        }
-    }
-    response = requests.post(url, headers=headers, data=json.dumps(payload))
+def send_wati_sms_greet(number):
+ 
+  WATI_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1MzEwOTJiNy1hYjkxLTRjYTEtOTc0Yy00YzBiYjAyNDlkNjkiLCJ1bmlxdWVfbmFtZSI6ImluZm9AZ29ibHUtZXYuY29tIiwibmFtZWlkIjoiaW5mb0Bnb2JsdS1ldi5jb20iLCJlbWFpbCI6ImluZm9AZ29ibHUtZXYuY29tIiwiYXV0aF90aW1lIjoiMDIvMDEvMjAyNCAwNTo0ODoxNyIsImRiX25hbWUiOiJtdC1wcm9kLVRlbmFudHMiLCJ0ZW5hbnRfaWQiOiIxMTM5MTgiLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJBRE1JTklTVFJBVE9SIiwiZXhwIjoyNTM0MDIzMDA4MDAsImlzcyI6IkNsYXJlX0FJIiwiYXVkIjoiQ2xhcmVfQUkifQ.uOPfYW9dl2pyTx42hSqfJ6EdP7RMCjfhTFGP0pQk5D0"
+  base_url = "https://live-mt-server.wati.io/113918/api/v1/sendTemplateMessage"
+  url = f"{base_url}?whatsappNumber={number}"
+  
+  headers = {
+      "Authorization": f"Bearer {WATI_TOKEN}",
+      "content-type": "Application/json",
+  }
+
+  data = {
+      "broadcast_name": "welcome_message_v5",
+      "template_name": "welcome_message_v5",
+  }
+  response = requests.post(url, headers=headers, json=data)
+  print(response)
+  print(response.text)
+  return
     
 
 def send_location_request_message(to):
@@ -680,26 +679,25 @@ def send_location_request_message(to):
         print(f"Failed to send message. Status Code: {response.status_code}")
         print(f"Response: {response.text}")
 
-def send_template_message_yes(to):
-    url = "https://graph.facebook.com/v20.0/368948182969171/messages"
-    headers = {
-        "Authorization": "Bearer EAAuXEbmPW2sBOZBLfFHJKCPAEVcfg2iHmqxkoxBZBLyhx48DXlDmrMEakZCNfhZBcVzBlPQZA8aUkyse0wKqSVyXC3eyDfLg9rTM4oSLnUHbPmjhZAZA8q3aB4ue3rHfmYrnZCHzQqwZAVKTCLlmJ5oXkySlxaZB6ksZBiU5wm2P9JB7yp519Ah5v4mLEpi2btcZB0ks065dZBKnZBGouI1ZCcp0w2BL5fSFbnVWHV4aHZBAMDT2",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "template",
-        "template": {
-            "name": "yes_no",  # Your template name
-            "language": {
-                "code": "en"
-            }
-        }
-    }
-    response = requests.post(url, headers=headers, data=json.dumps(payload))
-    return " "
-    print(response)
+def send_wati_sms(number):
+ 
+  WATI_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1MzEwOTJiNy1hYjkxLTRjYTEtOTc0Yy00YzBiYjAyNDlkNjkiLCJ1bmlxdWVfbmFtZSI6ImluZm9AZ29ibHUtZXYuY29tIiwibmFtZWlkIjoiaW5mb0Bnb2JsdS1ldi5jb20iLCJlbWFpbCI6ImluZm9AZ29ibHUtZXYuY29tIiwiYXV0aF90aW1lIjoiMDIvMDEvMjAyNCAwNTo0ODoxNyIsImRiX25hbWUiOiJtdC1wcm9kLVRlbmFudHMiLCJ0ZW5hbnRfaWQiOiIxMTM5MTgiLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJBRE1JTklTVFJBVE9SIiwiZXhwIjoyNTM0MDIzMDA4MDAsImlzcyI6IkNsYXJlX0FJIiwiYXVkIjoiQ2xhcmVfQUkifQ.uOPfYW9dl2pyTx42hSqfJ6EdP7RMCjfhTFGP0pQk5D0"
+  base_url = "https://live-mt-server.wati.io/113918/api/v1/sendTemplateMessage"
+  url = f"{base_url}?whatsappNumber={number}"
+  
+  headers = {
+      "Authorization": f"Bearer {WATI_TOKEN}",
+      "content-type": "Application/json",
+  }
+
+  data = {
+      "broadcast_name": "jayant_cofirm_or_cancel",
+      "template_name": "jayant_cofirm_or_cancel",
+  }
+  response = requests.post(url, headers=headers, json=data)
+  print(response)
+  print(response.text)
+  return
 def convert_time_date(time_str, date_str):
     """
     Convert time and date to the desired format.

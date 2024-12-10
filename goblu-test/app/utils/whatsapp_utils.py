@@ -14,31 +14,35 @@ conversation_history = {}
 
 import os
 
-def send_message(data):
-    headers = {
-        "Content-type": "application/json",
-        "Authorization": f"Bearer {current_app.config['ACCESS_TOKEN']}",
-    }
+def send_wati_message(phone_number, message_text, bearer_token, base_url):
+    """
+    Sends a message using the WATI API.
 
-    url = f"https://graph.facebook.com/{current_app.config['VERSION']}/{current_app.config['PHONE_NUMBER_ID']}/messages"
+    Parameters:
+        phone_number (str): The recipient's phone number (including country code).
+        message_text (str): The text message to be sent.
+        bearer_token (str): The authorization token for the API.
+        base_url (str): The base URL for the WATI API.
 
+    Returns:
+        dict: The response from the API.
+    """
+    url = f"{base_url}/api/v1/sendSessionMessage/{phone_number}?messageText={message_text}"
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+    
     try:
-        response = requests.post(
-            url, data=data, headers=headers, timeout=10
-        )  # 10 seconds timeout as an example
-        response.raise_for_status()  # Raises an HTTPError if the HTTP request returned an unsuccessful status code
-    except requests.Timeout:
-        logging.error("Timeout occurred while sending message")
-        return jsonify({"status": "error", "message": "Request timed out"}), 408
-    except (
-        requests.RequestException
-    ) as e:  # This will catch any general request exception
-        logging.error(f"Request failed due to: {e}")
-        return jsonify({"status": "error", "message": "Failed to send message"}), 500
-    else:
-        # Process the response as normal
-        log_http_response(response)
-        return response
+        response = requests.post(url, headers=headers)
+        response.raise_for_status()  # Raise an error for bad responses (4xx and 5xx)
+        return response  # Parse the response as JSON and return it
+    except requests.exceptions.RequestException as e:
+        return {"error": str(e)}
+
+# Example usage
+base_url = "https://live-mt-server.wati.io/113918"
+bearer_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJkMzE3MGYxZS0wMTZjLTRmZTYtYjJhNC1hY2I3ZDUzZWNjOGUiLCJ1bmlxdWVfbmFtZSI6ImluZm9AZ29ibHUtZXYuY29tIiwibmFtZWlkIjoiaW5mb0Bnb2JsdS1ldi5jb20iLCJlbWFpbCI6ImluZm9AZ29ibHUtZXYuY29tIiwiYXV0aF90aW1lIjoiMTEvMTkvMjAyNCAwODowOTozMCIsInRlbmFudF9pZCI6IjExMzkxOCIsImRiX25hbWUiOiJtdC1wcm9kLVRlbmFudHMiLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJBRE1JTklTVFJBVE9SIiwiZXhwIjoyNTM0MDIzMDA4MDAsImlzcyI6IkNsYXJlX0FJIiwiYXVkIjoiQ2xhcmVfQUkifQ.1S2Pbk70howvPLDZ2Lfpu3B4SAAUUdolORxTmlO8cdc"
+
+
+
         
 
 def process_text_for_whatsapp(text):
@@ -60,50 +64,58 @@ def process_text_for_whatsapp(text):
 
 
 def process_whatsapp_message(body):
+    """
+    Process incoming WhatsApp message and handle different message types.
+
+    Args:
+        body (dict): The incoming webhook payload.
+
+    Returns:
+        None
+    """
+    print("Experiment")
     print(body)
-    wa_id = body["entry"][0]["changes"][0]["value"]["contacts"][0]["wa_id"]
-    name = body["entry"][0]["changes"][0]["value"]["contacts"][0]["profile"]["name"]
-    message_type = body['entry'][0]['changes'][0]['value']['messages'][0]['type']
-    
-    
-    if(message_type == "text"):
-        message = body["entry"][0]["changes"][0]["value"]["messages"][0]
-        
-        
-        message_body = message["text"]["body"]
-        message_from = message["from"]
-        response = generate_response(message_body,wa_id,name,message_type)
 
-    elif(message_type=="location"):
-        print(message_type)
-        print(name)
-        print(wa_id)
-        message_from = body['entry'][0]['changes'][0]['value']['messages'][0]['from']
-        location = body['entry'][0]['changes'][0]['value']['messages'][0]['location']
+    # Extract common details from the new structure
+    wa_id = body.get("waId")
+    name = body.get("senderName")
+    message_type = body.get("type")
+
+    if message_type == "text":
+        # Process text messages
+        message_body = body.get("text", "")
+        response = generate_response(message_body, wa_id, name, message_type,"text2")
+
+    elif message_type == "location":
+        # Process location messages
+        location = body.get("text", "")
         message_body = str(location)
-        response = generate_response(message_body,wa_id,name,message_type)
+        response = generate_response(message_body, wa_id, name, message_type,"location2")
+
     else:
-        message_body = body['entry'][0]['changes'][0]['value']['messages'][0]['button']['text']
-        message_from = body['entry'][0]['changes'][0]['value']['messages'][0]['from']
-        response = generate_response(message_body,wa_id,name,message_type)
-        
-    if message_from not in conversation_history:
-        conversation_history[message_from] = []
-    conversation_history[message_from].append({"user": message_body, "model": response})
+        # Process button or other types of messages
+        button_reply = body.get("buttonReply", {}).get("text", "")
+        message_body = button_reply if button_reply else "Unsupported message type"
+        response = generate_response(message_body, wa_id, name, message_type,"button2")
 
-    
-    
-    # TODO: implement custom function here
-    
+    # Maintain conversation history
+    if wa_id not in conversation_history:
+        conversation_history[wa_id] = []
+    conversation_history[wa_id].append({"user": message_body, "model": response})
 
-    # OpenAI Integration
-    #response = generate_response(message_body, wa_id, name)
-
-    
+    # Process the response for WhatsApp formatting
     response = process_text_for_whatsapp(response)
 
-    data = get_text_message_input(message_from, response)
-    send_message(data)
+
+    list_of_wa_ids = ['919460733741', '919079661846', '916352698962','916264553145','918955744758']  # Example list
+
+    if wa_id in list_of_wa_ids:
+        responseit = send_wati_message(wa_id, response, bearer_token, base_url)
+        print(responseit)
+
+    
+    
+
 
 def log_http_response(response):
     logging.info(f"Status: {response.status_code}")
