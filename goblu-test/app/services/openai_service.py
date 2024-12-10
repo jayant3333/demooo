@@ -66,62 +66,94 @@ model = genai.GenerativeModel(
 
 
 )
-import shelve
+
+
+import sqlite3
 from datetime import datetime, timedelta
 
-# Store a thread's history along with the current timestamp
+# Get a connection to the SQLite database
+def get_connection():
+    return sqlite3.connect("threads_db.sqlite")
+
+# Ensure the database and table exist
+def setup_database():
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS threads (
+                wa_id TEXT PRIMARY KEY,
+                history TEXT,
+                current_state TEXT,
+                timestamp DATETIME
+            )
+        """)
+        conn.commit()
+
+# Call setup_database() at the start of your application
+setup_database()
+
+
+import json
+from datetime import datetime
+
 def store_thread(wa_id, history, current_state):
     print("Storing thread...")
-    current_time = datetime.now()  # Capture the current timestamp
-    with shelve.open("threads_db", writeback=True) as threads_shelf:
-        threads_shelf[wa_id] = {
-            "history": history, 
-            "timestamp": current_time, 
-            "current_state": current_state  # Store the current state
-        }
+    current_time = datetime.now().isoformat()  # Store timestamp as ISO format string
+
+    # Serialize the `history` list to a JSON string
+    history_json = json.dumps(history)
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO threads (wa_id, history, current_state, timestamp)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(wa_id) DO UPDATE SET
+                history = excluded.history,
+                current_state = excluded.current_state,
+                timestamp = excluded.timestamp
+        """, (wa_id, history_json, current_state, current_time))
+        conn.commit()
+        print(f"Thread for wa_id '{wa_id}' stored successfully.")
 
 
-# Check if a thread exists and if it's older than 5 minutes
+
 def check_if_thread_exists(wa_id):
     print("Checking thread...")
     current_time = datetime.now()
 
-    with shelve.open("threads_db", writeback=True) as threads_shelf:
-        thread_data = threads_shelf.get(wa_id, None)
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT history, current_state, timestamp FROM threads WHERE wa_id = ?", (wa_id,))
+        row = cursor.fetchone()
 
-        if thread_data:
-            print(f"Thread data found for wa_id {wa_id}")
+        if row:
+            history_json, current_state, thread_timestamp = row
+            thread_timestamp = datetime.fromisoformat(thread_timestamp)
 
-            # Ensure thread_data is in the correct format (dictionary)
-            if isinstance(thread_data, dict):
-                thread_timestamp = thread_data.get("timestamp", None)
+            # Deserialize `history` JSON string to a Python list
+            history = json.loads(history_json)
 
-                if thread_timestamp:
-                    print(f"Thread timestamp: {thread_timestamp}")
+            if current_time - thread_timestamp > timedelta(minutes=5):
+                print(f"Thread for wa_id {wa_id} is older than 5 minutes. Deleting...")
+                delete_thread_history(wa_id)
+                return None, None
+            else:
+                print(f"Thread for wa_id {wa_id} is within 5 minutes. Returning history and state.")
+                return history, current_state
 
-                    # Check if the time difference is more than 5 minutes
-                    time_diff = current_time - thread_timestamp
-
-                    if time_diff > timedelta(minutes=5):
-                        print(f"Thread for wa_id {wa_id} is older than 5 minutes. Deleting...")
-                        delete_thread_history(wa_id)
-                        return None, None  # Return None for both history and state since thread is deleted
-                    else:
-                        print(f"Thread for wa_id {wa_id} is within 5 minutes. Returning history and state.")
-                        return thread_data["history"], thread_data.get("current_state", None)  # Return history and current state
-        
         print(f"No thread found for wa_id {wa_id}.")
-        return None, None  # No thread found or not older than 5 minutes
+        return None, None
 
-# Delete thread history if it exists
 def delete_thread_history(wa_id):
     print("Deleting thread...")
-    with shelve.open("threads_db", writeback=True) as threads_shelf:
-        if wa_id in threads_shelf:
-            del threads_shelf[wa_id]
-            print(f"History for wa_id '{wa_id}' deleted successfully.")
-        else:
-            print(f"No history found for wa_id '{wa_id}'.")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM threads WHERE wa_id = ?", (wa_id,))
+        conn.commit()
+        print(f"Thread for wa_id '{wa_id}' deleted successfully.")
+
+
 
 def extract_place_info(url):
     # Define regex patterns to extract possible place-related information
@@ -367,7 +399,8 @@ def generate_response(message_body, wa_id, name,message_type,prev):
     elif "confirm" in message_body_lower:
         current_state = "confirm"
     if current_state == None:
-        return "please Select One Option From above menu To continue"
+        send_wati_sms_greet(wa_id)
+        return ""
         
     # Handle conversation states
     if current_state == "enquiry":
