@@ -53,7 +53,7 @@ def handle_message():
     # Compare the times
     if timestamp < current_time:
         print("The given timestamp is earlier than the current time.")
-        l= ['919460733741', '916352698962']
+        l= ['919460733741', '919079661846', '916352698962','916264553145','918955744758','61419469222']
         if message_details['wa_id'] in l:
             logging.info(f"Message details0: {message_details}")
             process_whatsapp_message(body)
