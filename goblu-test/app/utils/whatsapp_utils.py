@@ -107,7 +107,7 @@ def process_whatsapp_message(body):
     response = process_text_for_whatsapp(response)
 
 
-    list_of_wa_ids = ['919460733741', '919079661846', '916352698962','916264553145','918955744758']  # Example list
+    list_of_wa_ids = ['919460733741', '919079661846', '916352698962','916264553145','918955744758','61419469222']  # Example list
 
     if wa_id in list_of_wa_ids:
         responseit = send_wati_message(wa_id, response, bearer_token, base_url)
