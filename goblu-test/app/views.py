@@ -1,6 +1,8 @@
 import logging
 import json
 import requests
+import sqlite3
+import datetime
 from flask import Blueprint, request, jsonify, current_app
 from .decorators.security import signature_required
 from .utils.whatsapp_utils import process_whatsapp_message, is_valid_whatsapp_message
@@ -8,26 +10,72 @@ from .data_store import template_message_sent  # Import the dictionary from the 
 
 webhook_blueprint = Blueprint("webhook", __name__)
 
+DATABASE = "agentsprocess.db"
+
+def init_db():
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    # Create table if it doesn't exist
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS agent_process (
+        wa_id TEXT PRIMARY KEY,
+        operator_email TEXT NOT NULL,
+        timestamp TEXT NOT NULL
+    )
+    """)
+    conn.commit()
+    conn.close()
+
+# Store data in SQLite
+def store_data(wa_id, operator_email, timestamp):
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    # Insert or replace the record
+    cursor.execute("""
+    INSERT OR REPLACE INTO agent_process (wa_id, operator_email, timestamp)
+    VALUES (?, ?, ?)
+    """, (wa_id, operator_email, timestamp))
+    conn.commit()
+    conn.close()
+
+# Fetch data by wa_id
+def fetch_data(wa_id):
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT operator_email, timestamp FROM agent_process WHERE wa_id = ?
+    """, (wa_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result
+
+# Verify function
+def verify():
+    body = request.get_json()
+    print("body1111")
+    print(body)
+    if not body or "waId" not in body or "operatorEmail" not in body:
+        response = jsonify({"status": "error", "message": "Invalid JSON provided"})
+        response.status_code = 400
+        return response
+
+    wa_id = body.get("waId")
+    operator_email = body.get("operatorEmail")
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Store data in SQLite
+    store_data(wa_id, operator_email, timestamp)
+
+    response = jsonify({"status": "success", "message": "Data stored successfully"})
+    response.status_code = 200
+    return response
+
+
 
 def handle_message():
     from datetime import datetime ,timedelta
-    """
-    Handle incoming webhook events from the WhatsApp API.
-
-    This function processes incoming WhatsApp messages and other events,
-    such as delivery statuses. If the event is a valid message, it gets
-    processed. If the incoming payload is not a recognized WhatsApp event,
-    an error is returned.
-
-    Every message send will trigger 4 HTTP requests to your webhook: message, sent, delivered, read.
-
-    Returns:
-        response: A tuple containing a JSON response and an HTTP status code.
-    """
     body = request.get_json()
     print("body")
-
-    
 
     message_details = {
         "id": body.get("id"),
@@ -48,60 +96,79 @@ def handle_message():
     timestamp = datetime.strptime(message_details["created"].split('.')[0], "%Y-%m-%dT%H:%M:%S")
 
     # Get the current time
-    current_time = datetime.utcnow() - timedelta(minutes=1)
+    
+    print("57945444")
+    fetch_result = fetch_data(message_details['wa_id'])
+    if fetch_result is not None:
+        email, fetch_time = fetch_result
 
-    # Compare the times
-    if timestamp < current_time:
-        print("The given timestamp is earlier than the current time.")
-        l= ['919460733741', '919079661846', '916352698962','916264553145','918955744758','61419469222']
-        if message_details['wa_id'] in l:
-            logging.info(f"Message details0: {message_details}")
-            process_whatsapp_message(body)
+        # Current time
+        current_time = datetime.now()
 
-        # Log the extracted details
-        logging.info(f"Message details: {message_details}")
-        print(jsonify({"status": "error", "message": "Invalid JSON provided"}))
-        return jsonify({"status": "error", "message": "Invalid JSON provided"})
+        # Parse the fetched time into a datetime object
+        fetch_datetime = datetime.strptime(fetch_time, '%Y-%m-%d %H:%M:%S')
 
-    else:
-
-        print("The given timestamp is later than or equal to the current time.")
-        response = jsonify({"status": "error", "message": "Invalid JSON provided"})
-        response.status_code = 200
-        return response
-       
-# Required webhook verification for WhatsApp
-def verify():
-    # Parse params from the webhook verification request
-    print("hello")
-    print(request.json)
-    mode = request.args.get("hub.mode")
-    token = request.args.get("hub.verify_token")
-    challenge = request.args.get("hub.challenge")
-    print(token)
-    # Check if a token and mode were sent
-    if mode and token:
-        # Check the mode and token sent are correct
-        if mode == "subscribe" and token == current_app.config["VERIFY_TOKEN"]:
-            # Respond with 200 OK and challenge token from the request
-            logging.info("WEBHOOK_VERIFIED")
-            return challenge, 200
+        # Check if the email is not 'info@goblu-ev.com' and the time difference is less than 30 minutes
+        if email != 'info@goblu-ev.com' and (current_time - fetch_datetime) < timedelta(minutes=5):
+            response = jsonify({"status": "error", "message": "Invalid JSON provided"})
+            response.status_code = 200
+            print("Not processing")
+            return response
         else:
-            # Responds with '403 Forbidden' if verify tokens do not match
-            logging.info("VERIFICATION_FAILED")
-            return jsonify({"status": "error", "message": "Verification failed"}), 403
+        # Compare the times
+            if  (datetime.utcnow() - timestamp).total_seconds()/60 < 2:
+                print("The given timestamp is earlier than the current time.")
+                l= ['919460733741', '919079661846', '916352698962','916264553145','918955744758','918619766638','918000160789','919782749737','917014717238','917735944281']
+                if message_details['wa_id'] in l:
+                    logging.info(f"Message details0: {message_details}")
+                    process_whatsapp_message(body)
+
+                # Log the extracted details
+                logging.info(f"Message details: {message_details}")
+                print(jsonify({"status": "error", "message": "Invalid JSON provided"}))
+                return jsonify({"status": "error", "message": "Invalid JSON provided"})
+
+            else:
+                print("dsjnfdksjnvdskjz")
+
+                print("The given timestamp is later than or equal to the current time.")
+                response = jsonify({"status": "error", "message": "Invalid JSON provided"})
+                response.status_code = 200
+                return response
+            
     else:
-        # Responds with '400 Bad Request' if verify tokens do not match
-        logging.info("MISSING_PARAMETER")
-        return jsonify({"status": "error", "message": "Missing parameters"}), 400
+        if  (datetime.utcnow() - timestamp).total_seconds()/60 < 2:
+                print("The given timestamp is earlier than the current time.")
+                l= ['919460733741', '919079661846', '916352698962','916264553145','918955744758','918619766638','918000160789','919782749737','917014717238','917735944281','61419469222']
+                if message_details['wa_id'] in l:
+                    logging.info(f"Message details0: {message_details}")
+                    process_whatsapp_message(body)
+
+                # Log the extracted details
+                logging.info(f"Message details: {message_details}")
+                print(jsonify({"status": "error", "message": "Invalid JSON provided"}))
+                return jsonify({"status": "error", "message": "Invalid JSON provided"})
+
+        else:
+
+            print("The given timestamp is later than or equal to the current time.")
+            response = jsonify({"status": "error", "message": "Invalid JSON provided"})
+            response.status_code = 200
+            return response
+
+            
+# Required webhook verification for WhatsApp
 
 
-'''@webhook_blueprint.route("/webhook", methods=["GET"])
+
+@webhook_blueprint.route("/process", methods=["POST"])
 def webhook_get():
-    return verify()'''
+    return verify()
 
 @webhook_blueprint.route("/webhook", methods=["POST"])
 # @signature_required
 def webhook_post():
     print("Yes Webhook")
     return handle_message()
+
+init_db()
